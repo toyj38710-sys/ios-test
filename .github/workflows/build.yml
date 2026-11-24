@@ -1,0 +1,62 @@
+name: Build iOS App
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: |
+          cat << 'EOF' > App.swift
+          import SwiftUI
+          @main
+          struct MyApp: App {
+              var body: some Scene {
+                  WindowGroup { ContentView() }
+              }
+          }
+          EOF
+
+          cat << 'EOF' > project.yml
+          name: MyApp
+          options:
+            bundleIdPrefix: com.test
+          targets:
+            MyApp:
+              type: application
+              platform: iOS
+              deploymentTarget: "16.0"
+              sources:
+                - App.swift
+                - ContentView.swift
+          EOF
+
+          xcodegen generate
+
+      - name: Build Simulator App
+        run: |
+          xcodebuild -project MyApp.xcodeproj \
+            -scheme MyApp \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Zip and Upload to Appetize
+        env:
+          TOKEN: ${{ secrets.APPETIZE_API_TOKEN }}
+        run: |
+          cd build/Build/Products/Debug-iphonesimulator
+          zip -r app.zip MyApp.app
+          curl -s -X POST "https://appetize.io" \
+            -u "$TOKEN:" \
+            -F "file=@app.zip" \
+            -F "platform=ios" | grep -o '"publicURL":"[^"]*' | cut -d'"' -f4
